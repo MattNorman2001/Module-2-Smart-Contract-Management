@@ -1,81 +1,230 @@
-import React, { useState } from 'react';
+import { useState, useEffect } from "react";
+import { ethers } from "ethers";
+import atm_abi from "../artifacts/contracts/Assessment.sol/Assessment.json";
 
-const App = () => {
-  const [itemName, setItemName] = useState('');
-  const [price, setPrice] = useState('');
-  const [message, setMessage] = useState('');
-  const [itemPrices, setItemPrices] = useState({});
-  const [inventory, setInventory] = useState([]);
+export default function HomePage() {
+  const [ethWallet, setEthWallet] = useState(undefined);
+  const [account, setAccount] = useState(undefined);
+  const [atm, setATM] = useState(undefined);
+  const [balance, setBalance] = useState(undefined);
+  const [showAddress, setShowAddress] = useState(true);
+  const [amount, setAmount] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [recipient, setRecipient] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [showError, setShowError] = useState(false);
 
-  const setItemPrice = () => {
-    const itemPrice = parseFloat(price);
-    if (isNaN(itemPrice) || itemPrice <= 0) {
-      setMessage("Error: Price must be a number greater than zero");
-      return;
-    }
-    setItemPrices({ ...itemPrices, [itemName]: itemPrice });
-    setMessage(`Amount of ${itemName} set to ${price} ETH`);
-  };
+  const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+  const atmABI = atm_abi.abi;
 
-
-  const purchaseItem = () => {
-    const itemPrice = itemPrices[itemName];
-    if (itemPrice === undefined) {
-      setMessage(`Error: Price is not set for ${itemName}`);
-      return;
+  const getWallet = async () => {
+    if (window.ethereum) {
+      setEthWallet(window.ethereum);
     }
 
-    const item = { name: itemName, price: itemPrice };
-    setInventory([...inventory, item]);
-    setMessage(`Thank you for your partonage ${itemName} for ${itemPrice} ETH`);
+    if (ethWallet) {
+      const accounts = await ethWallet.request({ method: "eth_accounts" });
+      handleAccount(accounts);
+    }
   };
+
+  const handleAccount = (accounts) => {
+    if (accounts && accounts.length > 0) {
+      console.log("Account connected: ", accounts[0]);
+      setAccount(accounts[0]);
+    } else {
+      console.log("No account found");
+    }
+  };
+
+  const connectAccount = async () => {
+    if (!ethWallet) {
+      alert("MetaMask wallet is required to connect");
+      return;
+    }
+
+    const accounts = await ethWallet.request({ method: "eth_requestAccounts" });
+    handleAccount(accounts);
+
+    getATMContract();
+  };
+
+  const getATMContract = () => {
+    const provider = new ethers.providers.Web3Provider(ethWallet);
+    const signer = provider.getSigner();
+    const atmContract = new ethers.Contract(contractAddress, atmABI, signer);
+
+    setATM(atmContract);
+  };
+
+  const getBalance = async () => {
+    if (atm) {
+      setBalance((await atm.getBalance()).toNumber());
+    }
+  };
+
+  const deposit = async () => {
+    if (atm && amount) {
+      const depositAmount = parseInt(amount);
+      if (depositAmount > 0 && depositAmount <= 10) {
+        let tx = await atm.deposit(depositAmount, { value: ethers.utils.parseEther(amount) });
+        await tx.wait();
+        setBalance(balance + depositAmount);
+        setShowError(false);
+      } else {
+        setErrorMessage("You can only deposit up to 10 Tokens only");
+        setShowError(true);
+      }
+    }
+  };
+
+  const withdraw = async () => {
+    if (atm && amount) {
+      const withdrawAmount = parseInt(amount);
+      if (withdrawAmount > 0 && withdrawAmount <= balance) {
+        let tx = await atm.withdraw(withdrawAmount);
+        await tx.wait();
+        setBalance(balance - withdrawAmount);
+        setShowError(false);
+      } else {
+        setErrorMessage("You can only withdraw up to 10 Tokens only");
+        setShowError(true);
+      }
+    }
+  };
+
+  const transfer = async () => {
+    if (atm) {
+      if (!transferAmount && !recipient) {
+        setErrorMessage("Please enter a value first");
+        setShowError(true);
+        return;
+      }
+  
+      if (!transferAmount) {
+        setErrorMessage("Please enter an amount of up to 10 tokens");
+        setShowError(true);
+        return;
+      }
+  
+      if (!recipient) {
+        setErrorMessage("Please enter a valid address (e.g., 0x5FbDB2315678afecb367f032d93F642f64180aa3)");
+        setShowError(true);
+        return;
+      }
+  
+      const amountToTransfer = parseInt(transferAmount);
+      if (amountToTransfer > 0 && amountToTransfer <= 10 && ethers.utils.isAddress(recipient)) {
+        try {
+          let tx = await atm.transfer(recipient, amountToTransfer);
+          await tx.wait();
+          setBalance(balance - amountToTransfer);
+          setShowError(false);
+        } catch (error) {
+          setErrorMessage("Transfer failed");
+          setShowError(true);
+        }
+      } else {
+        setErrorMessage("Please enter a valid recipient address and amount");
+        setShowError(true);
+      }
+    }
+  };  
+
+  const toggleAddressVisibility = () => {
+    setShowAddress(!showAddress);
+  };
+
+  const handleAmountChange = (e) => {
+    setAmount(e.target.value);
+  };
+
+  const handleTransferAmountChange = (e) => {
+    setTransferAmount(e.target.value);
+  };
+
+  const handleRecipientChange = (e) => {
+    setRecipient(e.target.value);
+  };
+
+  const initUser = () => {
+    if (!ethWallet) {
+      return <p>Please install MetaMask in order to use this wallet.</p>;
+    }
+
+    if (!account) {
+      return <button onClick={connectAccount}>Open Wallet</button>;
+    }
+
+    if (balance === undefined) {
+      getBalance();
+    }
+
+    return (
+      <div className="wallet-container">
+        <button onClick={toggleAddressVisibility}>Show or Hide my Address</button>
+        {showAddress && <p>My Account: {account}</p>}
+        <p>My Balance: {balance}</p>
+        <div className="buttons-container">
+          <input type="number" value={amount} onChange={handleAmountChange} placeholder="Enter amount" min="1" max="10" />
+          <button onClick={deposit}>BUY</button>
+          <button onClick={withdraw}>SELL</button>
+          <input type="number" value={transferAmount} onChange={handleTransferAmountChange} placeholder="Enter transfer amount" min="1" max="10" />
+          <input type="text" value={recipient} onChange={handleRecipientChange} placeholder="Enter recipient address" />
+          <button onClick={transfer}>CLAIM THE GAMES</button>
+        </div>
+        {showError && <div className="error-message">{errorMessage}</div>}
+      </div>
+    );
+  };
+
+  useEffect(() => {
+    getWallet();
+  }, []);
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Courier New', background: 'transparent' }}>
-      <div style={{ maxWidth: '600px', width: '100%', margin: '0 auto', padding: '20px', border: '5px solid #000', borderRadius: '15px', backgroundColor: 'rgb(88,88,88)' }}>
-        <h1 style={{ color: '#ccc', textAlign: 'center' }}>MyOwnGames</h1>
-        <div style={{ marginBottom: '10px' }}>
-          <input 
-            type="text" 
-            placeholder="Name of Game " 
-            value={itemName} 
-            onChange={(e) => setItemName(e.target.value)} 
-            style={{ padding: '8px', marginRight: '10px', borderRadius: '5px', border: '1px solid #ccc', fontSize: '16px',fontFamily: 'Courier New', width: 'calc(50% - 10px)' }}
-          />
-          <input 
-            type="text" 
-            placeholder="Amount in ETH" 
-            value={price} 
-            onChange={(e) => setPrice(e.target.value)} 
-            style={{ padding: '8px', borderRadius: '5px', border: '1px solid #ccc', fontSize: '16px',fontFamily: 'Courier New', width: 'calc(50% - 10px)' }}
-          />
-        </div>
-        <div style={{ marginBottom: '10px' }}>
-          <button 
-            onClick={setItemPrice} 
-            style={{ padding: '5px 10px', borderRadius: '3px', border: 'none', backgroundColor: '#000', color: '#ffffff', cursor: 'pointer', fontSize: '14px',fontFamily: 'Courier New', marginRight: '10px' }}
-          >
-            Set Item Price
-          </button>
-          <button 
-            onClick={purchaseItem} 
-            style={{ padding: '5px 10px', borderRadius: '3px', border: 'none', backgroundColor: '#000', color: '#ffffff', cursor: 'pointer', fontSize: '14px',fontFamily: 'Courier New', marginLeft: '10px' }}
-          >
-            Purchase Item
-          </button>
-        </div>
-        <p style={{ margin: '10px 0', fontWeight: 'bold', color: '#ccc', textAlign: 'center' }}>{message}</p>
-        <div>
-        <h2 style={{ color: '#ccc',fontFamily: 'Courier New'}}>PurchaseItem</h2> 
-          <ul>
-            {inventory.map((item, index) => (
-              <li key={index}>{item.name} - {item.price} ETH</li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </div>
+    <main className="container">
+      <header>
+        <h1>MyOwnGames Wallet</h1>
+      </header>
+      {initUser()}
+      <style jsx>{`
+        .container {
+          text-align: center;
+          padding: 20px;
+          justify-content: center;
+          font-family: Courier New;
+          font-size: 20px;
+        }
+        .wallet-container {
+          border: 5px solid #000;
+          padding: 20px;
+          border-radius: 10px;
+          background-color: #C0C0C0;
+          text-align: center;
+          margin-top: 20px;
+          width: 300px;
+          position: relative;
+          alignItems: center;
+        }
+        .buttons-container {
+          margin-top: 20px;
+        }
+        .buttons-container button {
+          margin: 5px;
+        }
+        .error-message {
+          color: red;
+          position: absolute;
+          top: -20px;
+          left: 50%;
+          transform: translateX(-50%);
+          background-color: #fff;
+          padding: 5px 10px;
+          border: 1px solid red;
+          border-radius: 5px;
+        }
+      `}</style>
+    </main>
   );
-};
-
-export default App;
+}
